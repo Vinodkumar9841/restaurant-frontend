@@ -1,0 +1,500 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const RED = '#e23744';
+const DARK = '#1c1c1c';
+
+// Read the restaurant and table from the QR link, e.g. /?restaurantId=2&table=3
+const urlParams = new URLSearchParams(window.location.search);
+const RESTAURANT_ID = parseInt(urlParams.get('restaurantId')) || 1;
+const TABLE_FROM_LINK = urlParams.get('table') || '';
+
+function App() {
+  const [session, setSession] = useState(null);
+  const [tableNumber, setTableNumber] = useState(TABLE_FROM_LINK);
+  const [customerName, setCustomerName] = useState('');
+  const [restaurantName, setRestaurantName] = useState('');
+  const [menuItems, setMenuItems] = useState([]);
+  const [cart, setCart] = useState({});
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Recommendations: best sellers, plus items that other customers ordered with what is in the cart
+  const [recs, setRecs] = useState({ popular: [], pairings: [] });
+  const cartKey = Object.keys(cart).sort().join(',');
+  useEffect(() => {
+    if (!session) return;
+    const loadRecs = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/public/restaurants/${RESTAURANT_ID}/recommendations`, {
+          params: cartKey ? { cart: cartKey } : {},
+        });
+        setRecs(response.data);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadRecs();
+  }, [session, cartKey]);
+
+  // AI menu assistant
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  useEffect(() => {
+    axios.get(`${API_URL}/public/restaurants/${RESTAURANT_ID}/assistant/status`)
+      .then((res) => setAiEnabled(res.data.enabled === true))
+      .catch(() => setAiEnabled(false));
+  }, []);
+  const [aiInput, setAiInput] = useState('');
+  const [aiReply, setAiReply] = useState('');
+  const [aiItems, setAiItems] = useState([]);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const askAssistant = async () => {
+    if (!aiInput.trim()) return;
+    setAiLoading(true);
+    setAiReply('');
+    setAiItems([]);
+    try {
+      const response = await axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/assistant`, { message: aiInput });
+      setAiReply(response.data.reply);
+      setAiItems(response.data.items || []);
+    } catch (err) {
+      setAiReply(err.response?.data?.message || 'The assistant is not available right now.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Find out which restaurant this link belongs to
+  useEffect(() => {
+    const loadRestaurant = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/public/restaurants/${RESTAURANT_ID}`);
+        setRestaurantName(response.data.name);
+      } catch (err) {
+        setError('We could not find this restaurant. Please scan the QR code again.');
+      }
+    };
+    loadRestaurant();
+  }, []);
+
+  const handleLogin = async () => {
+    if (!tableNumber || !customerName) {
+      setError('Please enter both table number and your name');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/session`, {
+        tableNumber: parseInt(tableNumber),
+        customerName: customerName,
+        restaurantId: RESTAURANT_ID,
+      });
+      setSession(response.data);
+      fetchMenu();
+    } catch (err) {
+      setError('Something went wrong. Is the backend running?');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMenu = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/menu`, { params: { restaurantId: RESTAURANT_ID } });
+      setMenuItems(response.data.filter((item) => item.available !== false));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const addToCart = (itemId) => {
+    setCart((prev) => ({ ...prev, [itemId]: (prev[itemId] || 0) + 1 }));
+  };
+
+  const removeFromCart = (itemId) => {
+    setCart((prev) => {
+      const newCart = { ...prev };
+      if (newCart[itemId] > 1) newCart[itemId] -= 1;
+      else delete newCart[itemId];
+      return newCart;
+    });
+  };
+
+  const calculateTotal = () => {
+    let total = 0;
+    for (const itemId in cart) {
+      const item = menuItems.find((m) => m.id === parseInt(itemId));
+      if (item) total += item.price * cart[itemId];
+    }
+    return total.toFixed(2);
+  };
+
+  const cartItemCount = Object.values(cart).reduce((sum, qty) => sum + qty, 0);
+
+  const handlePlaceOrder = async () => {
+    if (cartItemCount === 0) {
+      setError('Please add at least one item before placing an order');
+      return;
+    }
+    setError('');
+    setLoading(true);
+
+    try {
+      const totalAmount = parseFloat(calculateTotal());
+
+      const paymentResponse = await axios.post(`${API_URL}/payments`, {
+        tableSessionId: session.id,
+        amount: totalAmount,
+      });
+
+      const { razorpayOrderId, amount, currency, razorpayKeyId } = paymentResponse.data;
+
+      const options = {
+        key: razorpayKeyId,
+        amount: amount,
+        currency: currency,
+        name: restaurantName || 'TableServe',
+        description: `Table ${session.tableNumber} order`,
+        order_id: razorpayOrderId,
+        handler: async function (response) {
+          try {
+            const verifyResponse = await axios.post(`${API_URL}/payments/verify`, {
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            });
+
+            if (!verifyResponse.data.verified) {
+              setError('Payment verification failed. Please try again.');
+              setLoading(false);
+              return;
+            }
+
+            const items = Object.entries(cart).map(([menuItemId, quantity]) => ({
+              menuItemId: parseInt(menuItemId),
+              quantity,
+            }));
+
+            const orderResponse = await axios.post(`${API_URL}/orders`, {
+              tableSessionId: session.id,
+              paymentId: verifyResponse.data.paymentId,
+              items,
+            });
+
+            setOrder(orderResponse.data);
+            setCart({});
+          } catch (err) {
+            setError('Something went wrong after payment. Please contact staff.');
+          } finally {
+            setLoading(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setLoading(false);
+            setError('Payment was cancelled.');
+          },
+        },
+        theme: { color: '#e23744' },
+      };
+
+      const razorpayCheckout = new window.Razorpay(options);
+      razorpayCheckout.open();
+    } catch (err) {
+      setError('Could not start payment. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handlePayCash = async () => {
+    if (cartItemCount === 0) {
+      setError('Please add at least one item before placing an order');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const totalAmount = parseFloat(calculateTotal());
+
+      const paymentResponse = await axios.post(`${API_URL}/payments/cash`, {
+        tableSessionId: session.id,
+        amount: totalAmount,
+      });
+
+      const items = Object.entries(cart).map(([menuItemId, quantity]) => ({
+        menuItemId: parseInt(menuItemId),
+        quantity,
+      }));
+
+      const orderResponse = await axios.post(`${API_URL}/orders`, {
+        tableSessionId: session.id,
+        paymentId: paymentResponse.data.paymentId,
+        items,
+      });
+
+      setOrder(orderResponse.data);
+      setCart({});
+    } catch (err) {
+      setError('Could not place order. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!order) return;
+    const interval = setInterval(async () => {
+      try {
+        const response = await axios.get(`${API_URL}/orders/${order.id}`);
+        setOrder(response.data);
+      } catch (err) {
+        console.error(err);
+      }
+    }, 3000);
+    if (order.status === 'SERVED') clearInterval(interval);
+    return () => clearInterval(interval);
+  }, [order]);
+
+  const statusStep = (status) => {
+    if (status === 'PENDING') return 1;
+    if (status === 'PREPARING') return 2;
+    if (status === 'SERVED') return 3;
+    return 0;
+  };
+
+  const categoryEmoji = (category) => {
+    if (category === 'Burgers') return '🍔';
+    if (category === 'Starters') return '🍢';
+    if (category === 'Beverages') return '🥤';
+    return '🍽️';
+  };
+
+  const pageStyle = {
+    fontFamily: "'Poppins', sans-serif",
+    background: '#f6f6f6',
+    minHeight: '100vh',
+  };
+
+  const topBar = {
+    background: DARK,
+    color: 'white',
+    padding: '18px 20px',
+    fontSize: '22px',
+    fontWeight: 700,
+    letterSpacing: '0.5px',
+  };
+
+  const brand = `🍴 ${restaurantName || 'TableServe'}`;
+
+  if (!session) {
+    return (
+      <div style={pageStyle}>
+        <div style={topBar}>{brand}</div>
+        <div style={{ maxWidth: '380px', margin: '50px auto', padding: '0 16px' }}>
+          <div style={{ background: 'white', borderRadius: '14px', padding: '28px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+            <h1 style={{ fontSize: '24px', margin: '0 0 6px', color: DARK }}>
+              {restaurantName ? `Welcome to ${restaurantName} 👋` : 'Welcome 👋'}
+            </h1>
+            <p style={{ color: '#888', fontSize: '14px', margin: '0 0 20px' }}>Enter your table details to see the menu</p>
+
+            <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Table Number</label>
+            <input
+              type="number"
+              value={tableNumber}
+              onChange={(e) => setTableNumber(e.target.value)}
+              style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 16px', boxSizing: 'border-box', background: 'white', color: DARK }}
+            />
+
+            <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Your Name</label>
+            <input
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 20px', boxSizing: 'border-box', background: 'white', color: DARK }}
+            />
+
+            {error && <p style={{ color: RED, fontSize: '13px' }}>{error}</p>}
+
+            <button
+              onClick={handleLogin}
+              disabled={loading}
+              style={{ width: '100%', padding: '13px', fontSize: '15px', fontWeight: 600, background: RED, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              {loading ? 'Loading...' : 'View Menu'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (order) {
+    const step = statusStep(order.status);
+    const labels = ['PENDING', 'PREPARING', 'SERVED'];
+    return (
+      <div style={pageStyle}>
+        <div style={topBar}>{brand}</div>
+        <div style={{ maxWidth: '420px', margin: '40px auto', padding: '0 16px' }}>
+          <div style={{ background: 'white', borderRadius: '14px', padding: '28px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <h1 style={{ fontSize: '20px', margin: '0 0 4px', color: DARK }}>Order #{order.id}</h1>
+            <p style={{ color: '#888', margin: '0 0 24px' }}>Total: Rs. {order.totalAmount}</p>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '20px 0' }}>
+              {labels.map((label, index) => (
+                <div key={label} style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{
+                    width: '32px', height: '32px', borderRadius: '50%', margin: '0 auto 6px',
+                    background: step >= index + 1 ? RED : '#eee',
+                    color: step >= index + 1 ? 'white' : '#999',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '14px',
+                  }}>
+                    {step > index + 1 || (step === index + 1 && label === 'SERVED') ? '✓' : index + 1}
+                  </div>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: step >= index + 1 ? RED : '#999' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+
+            {order.status === 'SERVED' ? (
+              <p style={{ color: '#27ae60', fontWeight: 600 }}>🎉 Served! Enjoy your meal.</p>
+            ) : (
+              <p style={{ color: '#888', fontSize: '13px' }}>We'll update this automatically — no need to refresh.</p>
+            )}
+
+            <button
+              onClick={() => setOrder(null)}
+              style={{ marginTop: '16px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: DARK, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              Order More
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={pageStyle}>
+      <div style={topBar}>
+        {brand}
+        <div style={{ fontSize: '13px', fontWeight: 400, color: '#ccc', marginTop: '2px' }}>
+          Table {session.tableNumber} · {session.customerName}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: '480px', margin: '0 auto', padding: '20px 16px 120px' }}>
+        {menuItems.length === 0 && <p style={{ color: '#888' }}>Loading menu...</p>}
+
+        {recs.pairings.length > 0 && (
+          <div style={{ background: '#fff4e6', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px' }}>
+            <div style={{ fontWeight: 700, fontSize: '14px', color: DARK, marginBottom: '10px' }}>Goes well with your order</div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {recs.pairings.map((p) => (
+                <button key={p.id} onClick={() => addToCart(p.id)} style={{ padding: '8px 12px', fontSize: '13px', fontWeight: 600, background: 'white', color: DARK, border: `1px solid ${RED}`, borderRadius: '20px', cursor: 'pointer' }}>
+                  + {p.name} · Rs. {p.price}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {menuItems.map((item) => (
+          <div key={item.id} style={{
+            background: 'white', borderRadius: '12px', padding: '14px 16px', marginBottom: '12px',
+            boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ fontSize: '28px' }}>{categoryEmoji(item.category)}</div>
+              <div>
+                <div style={{ fontWeight: 600, color: DARK, fontSize: '15px' }}>
+                  {item.name}
+                  {recs.popular.some((p) => p.id === item.id) && (
+                    <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 700, color: '#e67e22', background: '#fff4e6', padding: '2px 8px', borderRadius: '10px' }}>🔥 Popular</span>
+                  )}
+                </div>
+                <div style={{ fontSize: '12px', color: '#999', margin: '2px 0' }}>{item.category}</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: DARK }}>Rs. {item.price}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {cart[item.id] > 0 && (
+                <>
+                  <button onClick={() => removeFromCart(item.id)} style={{ width: '28px', height: '28px', borderRadius: '6px', border: `1px solid ${RED}`, background: 'white', color: RED, fontWeight: 700, cursor: 'pointer' }}>−</button>
+                  <span style={{ fontWeight: 600, minWidth: '16px', textAlign: 'center' }}>{cart[item.id]}</span>
+                </>
+              )}
+              <button onClick={() => addToCart(item.id)} style={{ width: '28px', height: '28px', borderRadius: '6px', border: 'none', background: RED, color: 'white', fontWeight: 700, cursor: 'pointer' }}>+</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {session && aiEnabled && (
+        <>
+          <button onClick={() => setAiOpen(!aiOpen)} style={{ position: 'fixed', right: '16px', bottom: cartItemCount > 0 ? '90px' : '20px', background: DARK, color: 'white', border: 'none', borderRadius: '24px', padding: '12px 18px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.25)', zIndex: 20 }}>
+            {aiOpen ? '✕ Close' : '✨ Ask AI'}
+          </button>
+          {aiOpen && (
+            <div style={{ position: 'fixed', right: '16px', left: '16px', maxWidth: '420px', marginLeft: 'auto', bottom: cartItemCount > 0 ? '140px' : '70px', background: 'white', borderRadius: '14px', padding: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.25)', zIndex: 20 }}>
+              <div style={{ fontWeight: 700, color: DARK, marginBottom: '4px' }}>What are you in the mood for?</div>
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>Try: "something spicy under Rs. 300"</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input value={aiInput} onChange={(e) => setAiInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') askAssistant(); }} placeholder="Ask about the menu" maxLength={300} style={{ flex: 1, padding: '10px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', background: 'white', color: DARK }} />
+                <button onClick={askAssistant} disabled={aiLoading} style={{ padding: '10px 16px', background: RED, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>{aiLoading ? '...' : 'Ask'}</button>
+              </div>
+              {aiReply && <p style={{ fontSize: '14px', color: DARK, margin: '12px 0 8px', lineHeight: 1.5 }}>{aiReply}</p>}
+              {aiItems.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {aiItems.map((it) => (
+                    <button key={it.id} onClick={() => addToCart(it.id)} style={{ padding: '8px 12px', fontSize: '13px', fontWeight: 600, background: 'white', color: DARK, border: `1px solid ${RED}`, borderRadius: '20px', cursor: 'pointer' }}>
+                      + {it.name} · Rs. {it.price}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {cartItemCount > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, background: RED, color: 'white',
+          padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          boxShadow: '0 -2px 10px rgba(0,0,0,0.15)',
+        }}>
+          <div style={{ fontSize: '14px' }}>
+            <div style={{ fontWeight: 700 }}>{cartItemCount} item{cartItemCount > 1 ? 's' : ''}</div>
+            <div style={{ fontSize: '13px', opacity: 0.9 }}>Rs. {calculateTotal()}</div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handlePayCash}
+              disabled={loading}
+              style={{ padding: '11px 16px', fontSize: '13px', fontWeight: 700, background: DARK, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              💵 Cash
+            </button>
+            <button
+              onClick={handlePlaceOrder}
+              disabled={loading}
+              style={{ padding: '11px 16px', fontSize: '13px', fontWeight: 700, background: 'white', color: RED, border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              {loading ? 'Placing...' : 'Pay Online →'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p style={{ color: RED, textAlign: 'center', padding: '0 16px' }}>{error}</p>}
+    </div>
+  );
+}
+
+export default App;
