@@ -68,6 +68,23 @@ function App() {
     }
   };
 
+  // Free / occupied tables (shown when the guest scanned the entrance QR code)
+  const [tables, setTables] = useState([]);
+  const loadTables = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables`);
+      setTables(response.data.tables || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  useEffect(() => {
+    if (session) return;
+    loadTables();
+    const timer = setInterval(loadTables, 5000);
+    return () => clearInterval(timer);
+  }, [session]);
+
   // Find out which restaurant this link belongs to
   useEffect(() => {
     const loadRestaurant = async () => {
@@ -83,12 +100,25 @@ function App() {
 
   const handleLogin = async () => {
     if (!tableNumber || !customerName) {
-      setError('Please enter both table number and your name');
+      setError('Please choose your table and enter your name');
       return;
     }
     setError('');
     setLoading(true);
     try {
+      // Guest chose a table from the list: take it, unless someone else just did
+      if (!TABLE_FROM_LINK && tables.length > 0) {
+        try {
+          await axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables/${tableNumber}/claim`);
+        } catch (claimErr) {
+          if (claimErr.response?.status === 409) {
+            setError('Sorry, this table was just taken. Please pick another one.');
+            setTableNumber('');
+            loadTables();
+            return;
+          }
+        }
+      }
       const response = await axios.post(`${API_URL}/session`, {
         tableNumber: parseInt(tableNumber),
         customerName: customerName,
@@ -96,6 +126,10 @@ function App() {
       });
       setSession(response.data);
       fetchMenu();
+      // Guest scanned the QR stuck on a table: mark that table occupied
+      if (TABLE_FROM_LINK) {
+        axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables/${tableNumber}/claim`, null, { params: { force: true } }).catch(() => {});
+      }
     } catch (err) {
       setError('Something went wrong. Is the backend running?');
     } finally {
@@ -302,13 +336,48 @@ function App() {
             </h1>
             <p style={{ color: '#888', fontSize: '14px', margin: '0 0 20px' }}>Enter your table details to see the menu</p>
 
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Table Number</label>
-            <input
-              type="number"
-              value={tableNumber}
-              onChange={(e) => setTableNumber(e.target.value)}
-              style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 16px', boxSizing: 'border-box', background: 'white', color: DARK }}
-            />
+            {!TABLE_FROM_LINK && tables.length > 0 ? (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Choose your table</label>
+                <div style={{ fontSize: '13px', margin: '6px 0 10px' }}>
+                  <span style={{ color: '#27ae60', fontWeight: 700 }}>{tables.filter((t) => !t.occupied).length} free</span>
+                  <span style={{ color: '#aaa' }}> · </span>
+                  <span style={{ color: '#e67e22', fontWeight: 700 }}>{tables.filter((t) => t.occupied).length} occupied</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: '8px' }}>
+                  {tables.map((t) => {
+                    const selected = String(tableNumber) === String(t.tableNumber);
+                    return (
+                      <button
+                        key={t.tableNumber}
+                        disabled={t.occupied}
+                        onClick={() => setTableNumber(String(t.tableNumber))}
+                        style={{
+                          padding: '10px 4px', fontSize: '15px', fontWeight: 700, borderRadius: '8px',
+                          cursor: t.occupied ? 'not-allowed' : 'pointer',
+                          border: selected ? `2px solid ${RED}` : t.occupied ? '1px solid #ddd' : '1px solid #27ae60',
+                          background: selected ? RED : t.occupied ? '#f0f0f0' : 'white',
+                          color: selected ? 'white' : t.occupied ? '#aaa' : '#27ae60',
+                        }}
+                      >
+                        {t.tableNumber}
+                        <div style={{ fontSize: '10px', fontWeight: 600 }}>{t.occupied ? 'Occupied' : selected ? 'Selected' : 'Free'}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Table Number</label>
+                <input
+                  type="number"
+                  value={tableNumber}
+                  onChange={(e) => setTableNumber(e.target.value)}
+                  style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 16px', boxSizing: 'border-box', background: 'white', color: DARK }}
+                />
+              </>
+            )}
 
             <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Your Name</label>
             <input

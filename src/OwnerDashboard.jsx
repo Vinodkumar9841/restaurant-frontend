@@ -162,6 +162,15 @@ function OwnerDashboard() {
     }
   };
 
+  const setTableOccupied = async (table, occupied) => {
+    try {
+      await axios.patch(`${API_URL}/owner/tables/${table.id}/occupied`, { occupied }, { headers: { Authorization: `Bearer ${token}` } });
+      fetchTables();
+    } catch (err) {
+      setError(`Could not update this table (${err.response?.status || err.message}).`);
+    }
+  };
+
   const handleAddStaff = async () => {
     if (newStaff.pin.length !== 4) {
       setError('PIN must be exactly 4 digits.');
@@ -205,6 +214,7 @@ function OwnerDashboard() {
     const timer = setInterval(() => {
       fetchDashboard();
       fetchStaff();
+      fetchTables();
     }, 5000);
     return () => clearInterval(timer);
   }, [token]);
@@ -350,6 +360,25 @@ function OwnerDashboard() {
           </div>
         ))}
 
+        {/* ENTRANCE QR CODE: one per restaurant, guests then type their own table number */}
+        {(() => {
+          const entranceUrl = `${window.location.origin}/?restaurantId=${ownerInfo?.restaurantId}`;
+          const entranceQr = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(entranceUrl)}`;
+          return (
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', margin: '28px 0 24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <img src={entranceQr} alt="Entrance QR code" style={{ width: '180px', height: '180px', borderRadius: '8px' }} />
+              <div style={{ flex: '1 1 220px' }}>
+                <h2 style={{ fontSize: '16px', margin: '0 0 8px' }}>Entrance QR Code</h2>
+                <p style={{ fontSize: '13px', color: '#666', margin: '0 0 10px', lineHeight: 1.5 }}>
+                  Print this and put it at your entrance. Guests scan it, type their table number and name, and order.
+                </p>
+                <div style={{ fontSize: '12px', color: '#888', wordBreak: 'break-all', marginBottom: '10px' }}>{entranceUrl}</div>
+                <a href={entranceQr} target="_blank" rel="noreferrer" style={{ fontSize: '13px', color: RED, textDecoration: 'none', fontWeight: 700 }}>Open large image to print or save</a>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* TABLE MANAGEMENT + QR CODES */}
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', margin: '28px 0 24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
           <h2 style={{ fontSize: '16px', margin: '0 0 14px' }}>Add Table</h2>
@@ -359,7 +388,12 @@ function OwnerDashboard() {
           </div>
         </div>
 
-        <h2 style={{ fontSize: '16px', marginBottom: '12px' }}>Your Tables</h2>
+        <h2 style={{ fontSize: '16px', marginBottom: '6px' }}>Your Tables</h2>
+        <div style={{ fontSize: '14px', marginBottom: '12px' }}>
+          <span style={{ color: '#27ae60', fontWeight: 700 }}>{tables.filter((t) => !t.isOccupied).length} free</span>
+          <span style={{ color: '#aaa' }}> · </span>
+          <span style={{ color: '#e67e22', fontWeight: 700 }}>{tables.filter((t) => t.isOccupied).length} occupied</span>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '14px', marginBottom: '28px' }}>
           {tables.map((table) => {
             const qrUrl = `${window.location.origin}/?restaurantId=${ownerInfo?.restaurantId}&table=${table.tableNumber}`;
@@ -368,6 +402,12 @@ function OwnerDashboard() {
               <div key={table.id} style={{ background: 'white', borderRadius: '10px', padding: '14px', textAlign: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
                 <img src={qrImageUrl} alt={`QR for table ${table.tableNumber}`} style={{ width: '100%', borderRadius: '6px' }} />
                 <div style={{ fontWeight: 700, marginTop: '8px' }}>Table {table.tableNumber}</div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: table.isOccupied ? '#e67e22' : '#27ae60', margin: '2px 0 6px' }}>
+                  {table.isOccupied ? 'Occupied' : 'Free'}
+                </div>
+                <button onClick={() => setTableOccupied(table, !table.isOccupied)} style={{ padding: '4px 10px', fontSize: '12px', fontWeight: 600, background: table.isOccupied ? '#27ae60' : '#e67e22', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', marginBottom: '6px' }}>
+                  {table.isOccupied ? 'Mark free' : 'Mark occupied'}
+                </button><br />
                 <a href={qrImageUrl} download={`table-${table.tableNumber}-qr.png`} style={{ fontSize: '12px', color: RED, textDecoration: 'none', fontWeight: 600 }}>Download</a>
               </div>
             );
