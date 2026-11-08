@@ -171,6 +171,39 @@ function OwnerDashboard() {
     }
   };
 
+  // Opens a printable bill (with GST) for one order in a new window
+  const openBill = async (order) => {
+    try {
+      const { data: b } = await axios.get(`${API_URL}/owner/orders/${order.id}/bill`, { headers: { Authorization: `Bearer ${token}` } });
+      const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const money = (v) => 'Rs. ' + Number(v).toFixed(2);
+      const when = b.createdAt ? new Date(b.createdAt).toLocaleString('en-IN') : '';
+      const where = b.orderType === 'TAKEAWAY' ? `Takeaway - Token #${esc(b.tokenNumber)}` : `Table ${esc(b.tableNumber)}`;
+      const rows = (b.items || []).map((i) => `<tr><td>${esc(i.name)}</td><td style="text-align:center">${esc(i.quantity)}</td><td style="text-align:right">${money(i.price)}</td><td style="text-align:right">${money(i.lineTotal)}</td></tr>`).join('');
+      const html = `<!doctype html><html><head><title>Bill #${esc(b.orderId)}</title>
+<style>body{font-family:Arial,sans-serif;max-width:340px;margin:20px auto;color:#111;font-size:13px}
+h2{text-align:center;margin:0}p{margin:3px 0}.c{text-align:center;color:#555}
+table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:4px 0;border-bottom:1px dashed #bbb}th{text-align:left}
+.t td{border:none;padding:2px 0}.g td{font-weight:bold;font-size:15px;border-top:2px solid #111;padding-top:6px}
+button{display:block;margin:16px auto;padding:8px 20px}@media print{button{display:none}}</style></head><body>
+<h2>${esc(b.restaurantName)}</h2><p class="c">${esc(b.restaurantAddress)}</p><hr>
+<p>Bill #${esc(b.orderId)}</p><p>${esc(when)}</p><p>${where}</p><p>Customer: ${esc(b.customerName)}</p>
+<table><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th></tr>${rows}</table>
+<table class="t"><tr><td>Taxable value</td><td style="text-align:right">${money(b.taxableValue)}</td></tr>
+<tr><td>CGST 2.5%</td><td style="text-align:right">${money(b.cgst)}</td></tr>
+<tr><td>SGST 2.5%</td><td style="text-align:right">${money(b.sgst)}</td></tr>
+<tr class="g"><td>TOTAL</td><td style="text-align:right">${money(b.total)}</td></tr></table>
+<p>Paid: ${esc(b.paymentMethod)}</p><p class="c">Prices include GST. Thank you!</p>
+<button onclick="window.print()">Print</button></body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { setError('Please allow pop-ups to open the bill.'); return; }
+      w.document.write(html);
+      w.document.close();
+    } catch (err) {
+      setError(`Could not open the bill (${err.response?.status || err.message}).`);
+    }
+  };
+
   const handleAddStaff = async () => {
     if (newStaff.pin.length !== 4) {
       setError('PIN must be exactly 4 digits.');
@@ -477,12 +510,20 @@ function OwnerDashboard() {
               <div>
                 <strong>Order #{order.id}</strong> — {order.tableSession?.orderType === 'TAKEAWAY' ? `🥡 Takeaway · Token #${order.tokenNumber}` : `Table ${order.tableSession?.tableNumber}`}
                 <div style={{ fontSize: '12px', color: '#888' }}>
-                  {order.tableSession?.customerName} · Rs. {order.totalAmount}
+                  {order.tableSession?.customerName} · Rs. {order.totalAmount} · {order.payment?.status === 'PAID' ? 'Paid online' : 'Cash'}
+                </div>
+                <div style={{ fontSize: '12px', color: '#aaa' }}>
+                  {order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : ''}
                 </div>
               </div>
-              <span style={{ background: s.bg, color: s.color, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 700 }}>
-                {order.status}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button onClick={() => openBill(order)} style={{ padding: '5px 12px', fontSize: '12px', fontWeight: 600, background: 'white', color: RED, border: `1px solid ${RED}`, borderRadius: '6px', cursor: 'pointer' }}>
+                  Bill
+                </button>
+                <span style={{ background: s.bg, color: s.color, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 700 }}>
+                  {order.status}
+                </span>
+              </div>
             </div>
           );
         })}
