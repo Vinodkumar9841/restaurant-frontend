@@ -222,6 +222,7 @@ function OwnerDashboard() {
   const statusColor = (status) => {
     if (status === 'PENDING') return { bg: '#fff4e6', color: '#e67e22' };
     if (status === 'PREPARING') return { bg: '#e8f1fc', color: '#2980b9' };
+    if (status === 'READY') return { bg: '#f3e8fc', color: '#8e44ad' };
     if (status === 'SERVED') return { bg: '#e9f9ee', color: '#27ae60' };
     return { bg: '#eee', color: '#888' };
   };
@@ -474,7 +475,7 @@ function OwnerDashboard() {
           return (
             <div key={order.id} style={{ background: 'white', borderRadius: '10px', padding: '14px 16px', marginBottom: '10px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <strong>Order #{order.id}</strong> — Table {order.tableSession?.tableNumber}
+                <strong>Order #{order.id}</strong> — {order.tableSession?.orderType === 'TAKEAWAY' ? `🥡 Takeaway · Token #${order.tokenNumber}` : `Table ${order.tableSession?.tableNumber}`}
                 <div style={{ fontSize: '12px', color: '#888' }}>
                   {order.tableSession?.customerName} · Rs. {order.totalAmount}
                 </div>

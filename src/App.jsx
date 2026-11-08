@@ -14,6 +14,8 @@ function App() {
   const [session, setSession] = useState(null);
   const [tableNumber, setTableNumber] = useState(TABLE_FROM_LINK);
   const [customerName, setCustomerName] = useState('');
+  const [orderType, setOrderType] = useState('DINE_IN');
+  const [customerPhone, setCustomerPhone] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
   const [menuItems, setMenuItems] = useState([]);
   const [cart, setCart] = useState({});
@@ -99,7 +101,13 @@ function App() {
   }, []);
 
   const handleLogin = async () => {
-    if (!tableNumber || !customerName) {
+    const takeaway = orderType === 'TAKEAWAY' && !TABLE_FROM_LINK;
+    if (takeaway) {
+      if (!customerName || customerPhone.replace(/\D/g, '').length < 10) {
+        setError('Please enter your name and a 10-digit phone number');
+        return;
+      }
+    } else if (!tableNumber || !customerName) {
       setError('Please choose your table and enter your name');
       return;
     }
@@ -107,7 +115,7 @@ function App() {
     setLoading(true);
     try {
       // Guest chose a table from the list: take it, unless someone else just did
-      if (!TABLE_FROM_LINK && tables.length > 0) {
+      if (!takeaway && !TABLE_FROM_LINK && tables.length > 0) {
         try {
           await axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables/${tableNumber}/claim`);
         } catch (claimErr) {
@@ -120,14 +128,16 @@ function App() {
         }
       }
       const response = await axios.post(`${API_URL}/session`, {
-        tableNumber: parseInt(tableNumber),
+        orderType: takeaway ? 'TAKEAWAY' : 'DINE_IN',
+        tableNumber: takeaway ? null : parseInt(tableNumber),
         customerName: customerName,
+        customerPhone: takeaway ? customerPhone : null,
         restaurantId: RESTAURANT_ID,
       });
       setSession(response.data);
       fetchMenu();
       // Guest scanned the QR stuck on a table: mark that table occupied
-      if (TABLE_FROM_LINK) {
+      if (!takeaway && TABLE_FROM_LINK) {
         axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables/${tableNumber}/claim`, null, { params: { force: true } }).catch(() => {});
       }
     } catch (err) {
@@ -193,7 +203,7 @@ function App() {
         amount: amount,
         currency: currency,
         name: restaurantName || 'TableServe',
-        description: `Table ${session.tableNumber} order`,
+        description: session.orderType === 'TAKEAWAY' ? 'Takeaway order' : `Table ${session.tableNumber} order`,
         order_id: razorpayOrderId,
         handler: async function (response) {
           try {
@@ -290,14 +300,14 @@ function App() {
         console.error(err);
       }
     }, 3000);
-    if (order.status === 'SERVED') clearInterval(interval);
+    if (order.status === 'SERVED' || (order.status === 'READY' && session?.orderType === 'TAKEAWAY')) clearInterval(interval);
     return () => clearInterval(interval);
   }, [order]);
 
   const statusStep = (status) => {
     if (status === 'PENDING') return 1;
     if (status === 'PREPARING') return 2;
-    if (status === 'SERVED') return 3;
+    if (status === 'SERVED' || status === 'READY') return 3;
     return 0;
   };
 
@@ -334,9 +344,25 @@ function App() {
             <h1 style={{ fontSize: '24px', margin: '0 0 6px', color: DARK }}>
               {restaurantName ? `Welcome to ${restaurantName} 👋` : 'Welcome 👋'}
             </h1>
-            <p style={{ color: '#888', fontSize: '14px', margin: '0 0 20px' }}>Enter your table details to see the menu</p>
+            <p style={{ color: '#888', fontSize: '14px', margin: '0 0 20px' }}>{orderType === 'TAKEAWAY' && !TABLE_FROM_LINK ? 'Order ahead and pick it up' : 'Enter your table details to see the menu'}</p>
 
-            {!TABLE_FROM_LINK && tables.length > 0 ? (
+            {!TABLE_FROM_LINK && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+                {[['DINE_IN', '🍽️ Dine-in'], ['TAKEAWAY', '🥡 Takeaway']].map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => { setOrderType(val); setError(''); }}
+                    style={{ flex: 1, padding: '11px', fontSize: '14px', fontWeight: 600, borderRadius: '8px', cursor: 'pointer',
+                      border: orderType === val ? `2px solid ${RED}` : '1px solid #ddd',
+                      background: orderType === val ? RED : 'white', color: orderType === val ? 'white' : DARK }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {orderType === 'TAKEAWAY' && !TABLE_FROM_LINK ? null : !TABLE_FROM_LINK && tables.length > 0 ? (
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Choose your table</label>
                 <div style={{ fontSize: '13px', margin: '6px 0 10px' }}>
@@ -387,6 +413,18 @@ function App() {
               style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 20px', boxSizing: 'border-box', background: 'white', color: DARK }}
             />
 
+            {orderType === 'TAKEAWAY' && !TABLE_FROM_LINK && (
+              <>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#555' }}>Phone Number</label>
+                <input
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '8px', margin: '6px 0 20px', boxSizing: 'border-box', background: 'white', color: DARK }}
+                />
+              </>
+            )}
+
             {error && <p style={{ color: RED, fontSize: '13px' }}>{error}</p>}
 
             <button
@@ -404,12 +442,20 @@ function App() {
 
   if (order) {
     const step = statusStep(order.status);
-    const labels = ['PENDING', 'PREPARING', 'SERVED'];
+    const isTakeaway = session.orderType === 'TAKEAWAY';
+    const labels = isTakeaway ? ['PENDING', 'PREPARING', 'READY'] : ['PENDING', 'PREPARING', 'SERVED'];
+    const finalLabel = labels[2];
     return (
       <div style={pageStyle}>
         <div style={topBar}>{brand}</div>
         <div style={{ maxWidth: '420px', margin: '40px auto', padding: '0 16px' }}>
           <div style={{ background: 'white', borderRadius: '14px', padding: '28px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            {isTakeaway && order.tokenNumber && (
+              <div style={{ background: '#fff4e6', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '12px', color: '#e67e22', fontWeight: 700 }}>YOUR TOKEN</div>
+                <div style={{ fontSize: '44px', fontWeight: 800, color: DARK, lineHeight: 1.1 }}>#{order.tokenNumber}</div>
+              </div>
+            )}
             <h1 style={{ fontSize: '20px', margin: '0 0 4px', color: DARK }}>Order #{order.id}</h1>
             <p style={{ color: '#888', margin: '0 0 24px' }}>Total: Rs. {order.totalAmount}</p>
 
@@ -422,15 +468,17 @@ function App() {
                     color: step >= index + 1 ? 'white' : '#999',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '14px',
                   }}>
-                    {step > index + 1 || (step === index + 1 && label === 'SERVED') ? '✓' : index + 1}
+                    {step > index + 1 || (step === index + 1 && label === finalLabel) ? '✓' : index + 1}
                   </div>
                   <span style={{ fontSize: '12px', fontWeight: 600, color: step >= index + 1 ? RED : '#999' }}>{label}</span>
                 </div>
               ))}
             </div>
 
-            {order.status === 'SERVED' ? (
-              <p style={{ color: '#27ae60', fontWeight: 600 }}>🎉 Served! Enjoy your meal.</p>
+            {order.status === 'READY' && isTakeaway ? (
+              <p style={{ color: '#8e44ad', fontWeight: 700 }}>🥡 Your order is ready! Show token #{order.tokenNumber} at the counter.</p>
+            ) : order.status === 'SERVED' ? (
+              <p style={{ color: '#27ae60', fontWeight: 600 }}>{isTakeaway ? '🎉 Picked up. Enjoy your meal!' : '🎉 Served! Enjoy your meal.'}</p>
             ) : (
               <p style={{ color: '#888', fontSize: '13px' }}>We'll update this automatically — no need to refresh.</p>
             )}
@@ -452,7 +500,7 @@ function App() {
       <div style={topBar}>
         {brand}
         <div style={{ fontSize: '13px', fontWeight: 400, color: '#ccc', marginTop: '2px' }}>
-          Table {session.tableNumber} · {session.customerName}
+          {session.orderType === 'TAKEAWAY' ? '🥡 Takeaway' : `Table ${session.tableNumber}`} · {session.customerName}
         </div>
       </div>
 

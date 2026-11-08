@@ -92,13 +92,14 @@ function KitchenDashboard() {
   const statusStyle = (status) => {
     if (status === 'PENDING') return { bg: '#fff4e6', color: '#e67e22' };
     if (status === 'PREPARING') return { bg: '#e8f1fc', color: '#2980b9' };
+    if (status === 'READY') return { bg: '#f3e8fc', color: '#8e44ad' };
     if (status === 'SERVED') return { bg: '#e9f9ee', color: '#27ae60' };
     return { bg: '#eee', color: '#888' };
   };
 
   // Sort the orders into the three tabs
   const isMine = (o) => o.assignedChef && o.assignedChef.name === chefName;
-  const isWaiting = (o) => !o.assignedChef && o.status !== 'SERVED';
+  const isWaiting = (o) => !o.assignedChef && o.status !== 'SERVED' && o.status !== 'READY';
   const mineOrders = orders.filter(isMine);
   const waitingOrders = orders.filter(isWaiting);
   const visibleOrders = tab === 'mine' ? mineOrders : tab === 'waiting' ? waitingOrders : orders;
@@ -197,9 +198,9 @@ function KitchenDashboard() {
             <div key={order.id} style={{ background: 'white', borderRadius: '12px', padding: '18px', marginBottom: '14px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: '16px', color: DARK }}>Order #{order.id} — Table {order.tableSession?.tableNumber}</div>
+                  <div style={{ fontWeight: 700, fontSize: '16px', color: DARK }}>Order #{order.id} — {order.tableSession?.orderType === 'TAKEAWAY' ? `🥡 TAKEAWAY · Token #${order.tokenNumber}` : `Table ${order.tableSession?.tableNumber}`}</div>
                   <div style={{ fontSize: '13px', color: '#888', margin: '4px 0' }}>
-                    {order.tableSession?.customerName} · Rs. {order.totalAmount}
+                    {order.tableSession?.customerName}{order.tableSession?.orderType === 'TAKEAWAY' && order.tableSession?.customerPhone ? ` · 📞 ${order.tableSession.customerPhone}` : ''} · Rs. {order.totalAmount}
                   </div>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: order.assignedChef ? '#2980b9' : '#e67e22' }}>
                     {order.assignedChef
@@ -219,8 +220,13 @@ function KitchenDashboard() {
                   </button>
                 )}
                 {order.status === 'PREPARING' && (
-                  <button onClick={() => updateStatus(order.id, 'SERVED')} style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, background: '#27ae60', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-                    Mark Served
+                  <button onClick={() => updateStatus(order.id, order.tableSession?.orderType === 'TAKEAWAY' ? 'READY' : 'SERVED')} style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, background: '#27ae60', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                    {order.tableSession?.orderType === 'TAKEAWAY' ? 'Mark Ready for pickup' : 'Mark Served'}
+                  </button>
+                )}
+                {order.status === 'READY' && (
+                  <button onClick={() => updateStatus(order.id, 'SERVED')} style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, background: '#8e44ad', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                    Handed over to customer
                   </button>
                 )}
                 {order.status === 'SERVED' && <span style={{ color: '#27ae60', fontWeight: 700, fontSize: '13px' }}>✓ Completed</span>}
