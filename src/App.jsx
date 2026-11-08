@@ -551,9 +551,15 @@ function App() {
             boxShadow: '0 1px 6px rgba(0,0,0,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '28px' }}>{categoryEmoji(item.category)}</div>
+              <div style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '10px', background: '#f3f0f8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', overflow: 'hidden', flexShrink: 0 }}>
+                {categoryEmoji(item.category)}
+                {item.imageUrl && item.imageUrl.trim() && (
+                  <img src={item.imageUrl} alt={item.name} loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+              </div>
               <div>
                 <div style={{ fontWeight: 600, color: DARK, fontSize: '15px' }}>
+                  <span title={item.isVeg !== false ? 'Veg' : 'Non-veg'} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '14px', height: '14px', border: `2px solid ${item.isVeg !== false ? '#0f8a3c' : '#c0392b'}`, borderRadius: '3px', marginRight: '7px', verticalAlign: 'middle', boxSizing: 'border-box' }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: item.isVeg !== false ? '#0f8a3c' : '#c0392b' }} /></span>
                   {item.name}
                   {recs.popular.some((p) => p.id === item.id) && (
                     <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 700, color: '#e67e22', background: '#fff4e6', padding: '2px 8px', borderRadius: '10px' }}>🔥 Popular</span>

@@ -18,9 +18,9 @@ function OwnerDashboard() {
   const [error, setError] = useState('');
 
   const [menuItems, setMenuItems] = useState([]);
-  const [newItem, setNewItem] = useState({ name: '', price: '', category: '' });
+  const [newItem, setNewItem] = useState({ name: '', price: '', category: '', imageUrl: '', isVeg: true });
   const [editingId, setEditingId] = useState(null);
-  const [editValues, setEditValues] = useState({ name: '', price: '', category: '' });
+  const [editValues, setEditValues] = useState({ name: '', price: '', category: '', imageUrl: '', isVeg: true });
 
   const [tables, setTables] = useState([]);
   const [newTableNumber, setNewTableNumber] = useState('');
@@ -90,9 +90,11 @@ function OwnerDashboard() {
         name: newItem.name,
         price: parseFloat(newItem.price),
         category: newItem.category,
+        imageUrl: newItem.imageUrl.trim(),
+        isVeg: newItem.isVeg,
         available: true,
       }, { headers: { Authorization: `Bearer ${token}` } });
-      setNewItem({ name: '', price: '', category: '' });
+      setNewItem({ name: '', price: '', category: '', imageUrl: '', isVeg: true });
       fetchMenu();
     } catch (err) {
       setError('Could not add menu item.');
@@ -101,7 +103,7 @@ function OwnerDashboard() {
 
   const startEditing = (item) => {
     setEditingId(item.id);
-    setEditValues({ name: item.name, price: String(item.price), category: item.category || '' });
+    setEditValues({ name: item.name, price: String(item.price), category: item.category || '', imageUrl: item.imageUrl || '', isVeg: item.isVeg !== false });
   };
 
   const saveEdit = async (id) => {
@@ -115,6 +117,8 @@ function OwnerDashboard() {
         name: editValues.name.trim(),
         price,
         category: editValues.category.trim(),
+        imageUrl: (editValues.imageUrl || '').trim() || ' ',
+        isVeg: editValues.isVeg,
       }, { headers: { Authorization: `Bearer ${token}` } });
       setEditingId(null);
       setError('');
@@ -359,6 +363,11 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
             <input placeholder="Name" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} style={{ flex: '1 1 150px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
             <input placeholder="Price" type="number" value={newItem.price} onChange={(e) => setNewItem({ ...newItem, price: e.target.value })} style={{ flex: '1 1 100px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
             <input placeholder="Category" value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })} style={{ flex: '1 1 130px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
+            <input placeholder="Photo link (optional)" value={newItem.imageUrl} onChange={(e) => setNewItem({ ...newItem, imageUrl: e.target.value })} style={{ flex: '1 1 220px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
+            <select value={newItem.isVeg ? 'veg' : 'nonveg'} onChange={(e) => setNewItem({ ...newItem, isVeg: e.target.value === 'veg' })} style={{ flex: '1 1 110px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }}>
+              <option value="veg">Veg</option>
+              <option value="nonveg">Non-veg</option>
+            </select>
             <button onClick={handleAddItem} style={{ padding: '10px 20px', background: RED, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>Add</button>
           </div>
         </div>
@@ -373,6 +382,11 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
                   <input value={editValues.name} onChange={(e) => setEditValues({ ...editValues, name: e.target.value })} style={{ flex: '1 1 140px', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
                   <input type="number" value={editValues.price} onChange={(e) => setEditValues({ ...editValues, price: e.target.value })} style={{ flex: '1 1 80px', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
                   <input value={editValues.category} onChange={(e) => setEditValues({ ...editValues, category: e.target.value })} style={{ flex: '1 1 110px', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
+                  <input placeholder="Photo link" value={editValues.imageUrl} onChange={(e) => setEditValues({ ...editValues, imageUrl: e.target.value })} style={{ flex: '1 1 100%', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
+                  <select value={editValues.isVeg ? 'veg' : 'nonveg'} onChange={(e) => setEditValues({ ...editValues, isVeg: e.target.value === 'veg' })} style={{ flex: '1 1 110px', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }}>
+                    <option value="veg">Veg</option>
+                    <option value="nonveg">Non-veg</option>
+                  </select>
                 </div>
                 <button onClick={() => saveEdit(item.id)} style={{ padding: '6px 16px', fontSize: '13px', fontWeight: 600, background: '#27ae60', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', marginRight: '8px' }}>Save</button>
                 <button onClick={() => setEditingId(null)} style={{ padding: '6px 16px', fontSize: '13px', fontWeight: 600, background: '#eee', color: '#333', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
@@ -380,7 +394,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
             ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <div>
-                  <strong>{item.name}</strong> — Rs. {item.price}
+                  <span title={item.isVeg !== false ? 'Veg' : 'Non-veg'} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '14px', height: '14px', border: `2px solid ${item.isVeg !== false ? '#0f8a3c' : '#c0392b'}`, borderRadius: '3px', marginRight: '7px', verticalAlign: 'middle', boxSizing: 'border-box' }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: item.isVeg !== false ? '#0f8a3c' : '#c0392b' }} /></span><strong>{item.name}</strong> — Rs. {item.price}
                   <div style={{ fontSize: '12px', color: '#888' }}>
                     {item.category} · <span style={{ fontWeight: 700, color: item.available ? '#27ae60' : '#e67e22' }}>{item.available ? 'Visible to customers' : 'Hidden'}</span>
                   </div>
