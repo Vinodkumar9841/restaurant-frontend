@@ -147,6 +147,22 @@ function App() {
     }
   };
 
+  // Guest tapped "I'm done": free the table and return to the welcome screen
+  const handleDone = async () => {
+    if (!window.confirm("Leaving? This frees your table for the next guest.")) return;
+    try {
+      if (session?.orderType !== 'TAKEAWAY' && session?.tableNumber) {
+        await axios.post(`${API_URL}/public/restaurants/${RESTAURANT_ID}/tables/${session.tableNumber}/release`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setOrder(null);
+    setCart({});
+    setSession(null);
+    setTableNumber(TABLE_FROM_LINK);
+  };
+
   const fetchMenu = async () => {
     try {
       const response = await axios.get(`${API_URL}/menu`, { params: { restaurantId: RESTAURANT_ID } });
@@ -489,6 +505,12 @@ function App() {
             >
               Order More
             </button>
+            <button
+              onClick={handleDone}
+              style={{ marginTop: '12px', marginLeft: '8px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: 'white', color: RED, border: `1px solid ${RED}`, borderRadius: '8px', cursor: 'pointer' }}
+            >
+              {session.orderType === 'TAKEAWAY' ? 'Finish' : "I'm done"}
+            </button>
           </div>
         </div>
       </div>
@@ -501,6 +523,9 @@ function App() {
         {brand}
         <div style={{ fontSize: '13px', fontWeight: 400, color: '#ccc', marginTop: '2px' }}>
           {session.orderType === 'TAKEAWAY' ? '🥡 Takeaway' : `Table ${session.tableNumber}`} · {session.customerName}
+          <button onClick={handleDone} style={{ marginLeft: '12px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, background: 'transparent', color: '#ccc', border: '1px solid #666', borderRadius: '12px', cursor: 'pointer' }}>
+            {session.orderType === 'TAKEAWAY' ? 'Leave' : "I'm done"}
+          </button>
         </div>
       </div>
 
