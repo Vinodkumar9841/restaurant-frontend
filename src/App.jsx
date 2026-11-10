@@ -16,6 +16,8 @@ function App() {
   const [customerName, setCustomerName] = useState('');
   const [orderType, setOrderType] = useState('DINE_IN');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const [upiOpen, setUpiOpen] = useState(false);
   const [restaurantName, setRestaurantName] = useState('');
   const [menuItems, setMenuItems] = useState([]);
   const [cart, setCart] = useState({});
@@ -93,6 +95,7 @@ function App() {
       try {
         const response = await axios.get(`${API_URL}/public/restaurants/${RESTAURANT_ID}`);
         setRestaurantName(response.data.name);
+        setUpiId(response.data.upiId || '');
       } catch (err) {
         setError('We could not find this restaurant. Please scan the QR code again.');
       }
@@ -243,6 +246,7 @@ function App() {
             const orderResponse = await axios.post(`${API_URL}/orders`, {
               tableSessionId: session.id,
               paymentId: verifyResponse.data.paymentId,
+              paymentMode: 'ONLINE',
               items,
             });
 
@@ -271,7 +275,8 @@ function App() {
     }
   };
 
-  const handlePayCash = async () => {
+  // mode is CASH (pay at counter) or UPI (guest paid the restaurant's UPI QR)
+  const handlePayCash = async (mode = 'CASH') => {
     if (cartItemCount === 0) {
       setError('Please add at least one item before placing an order');
       return;
@@ -294,6 +299,7 @@ function App() {
       const orderResponse = await axios.post(`${API_URL}/orders`, {
         tableSessionId: session.id,
         paymentId: paymentResponse.data.paymentId,
+        paymentMode: mode,
         items,
       });
 
@@ -611,6 +617,32 @@ function App() {
         </>
       )}
 
+      {upiOpen && (() => {
+        const amount = calculateTotal();
+        const upiLink = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(restaurantName || 'Restaurant')}&am=${amount}&cu=INR&tn=${encodeURIComponent('Food order')}`;
+        const qr = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(upiLink)}`;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '14px', padding: '22px', width: '100%', maxWidth: '340px', textAlign: 'center' }}>
+              <h2 style={{ margin: '0 0 4px', fontSize: '18px', color: DARK }}>Pay Rs. {amount} by UPI</h2>
+              <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#888' }}>Scan with any UPI app, or tap the button on your phone</p>
+              <img src={qr} alt="UPI QR" style={{ width: '200px', height: '200px' }} />
+              <div style={{ fontSize: '12px', color: '#555', margin: '8px 0 12px' }}>{upiId}</div>
+              <a href={upiLink} style={{ display: 'block', padding: '11px', background: DARK, color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: 600, fontSize: '14px', marginBottom: '10px' }}>Open UPI app</a>
+              <button
+                onClick={async () => { await handlePayCash('UPI'); setUpiOpen(false); }}
+                disabled={loading}
+                style={{ width: '100%', padding: '12px', background: '#27ae60', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 700, fontSize: '14px', cursor: 'pointer', marginBottom: '8px' }}
+              >
+                {loading ? 'Placing...' : "I've paid — place order"}
+              </button>
+              <button onClick={() => setUpiOpen(false)} style={{ width: '100%', padding: '10px', background: '#eee', color: '#333', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+              <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#aaa' }}>The restaurant will check your payment at the counter.</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {cartItemCount > 0 && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, background: RED, color: 'white',
@@ -623,12 +655,21 @@ function App() {
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={handlePayCash}
+              onClick={() => handlePayCash('CASH')}
               disabled={loading}
               style={{ padding: '11px 16px', fontSize: '13px', fontWeight: 700, background: DARK, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
             >
               💵 Cash
             </button>
+            {upiId && (
+              <button
+                onClick={() => setUpiOpen(true)}
+                disabled={loading}
+                style={{ padding: '11px 16px', fontSize: '13px', fontWeight: 700, background: DARK, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                📲 UPI
+              </button>
+            )}
             <button
               onClick={handlePlaceOrder}
               disabled={loading}

@@ -26,6 +26,8 @@ function OwnerDashboard() {
   const [newTableNumber, setNewTableNumber] = useState('');
 
   const [staff, setStaff] = useState([]);
+  const [upiInput, setUpiInput] = useState('');
+  const [upiMsg, setUpiMsg] = useState('');
   const [newStaff, setNewStaff] = useState({ name: '', pin: '' });
 
   const handleLogin = async () => {
@@ -208,6 +210,25 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     }
   };
 
+  const fetchUpi = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/owner/upi`, { headers: { Authorization: `Bearer ${token}` } });
+      setUpiInput(response.data.upiId || '');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const saveUpi = async () => {
+    setUpiMsg('');
+    try {
+      await axios.put(`${API_URL}/owner/upi`, { upiId: upiInput.trim() }, { headers: { Authorization: `Bearer ${token}` } });
+      setUpiMsg(upiInput.trim() ? 'Saved. Guests will now see a UPI payment button.' : 'Removed. UPI payment is turned off.');
+    } catch (err) {
+      setUpiMsg('That does not look like a UPI ID. Example: shopname@okbank');
+    }
+  };
+
   const handleAddStaff = async () => {
     if (newStaff.pin.length !== 4) {
       setError('PIN must be exactly 4 digits.');
@@ -247,6 +268,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     fetchMenu();
     fetchTables();
     fetchStaff();
+    fetchUpi();
     // Keep the numbers and chef workloads fresh without pressing Refresh
     const timer = setInterval(() => {
       fetchDashboard();
@@ -355,6 +377,17 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
             </div>
           </div>
         )}
+
+        {/* UPI PAYMENT SETTING */}
+        <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+          <h2 style={{ fontSize: '16px', margin: '0 0 6px' }}>UPI Payments</h2>
+          <p style={{ fontSize: '12px', color: '#888', margin: '0 0 12px' }}>Enter your shop's UPI ID. Guests pay it directly and the money goes straight to you. Leave empty to turn it off.</p>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <input placeholder="shopname@okbank" value={upiInput} onChange={(e) => setUpiInput(e.target.value)} style={{ flex: '1 1 220px', padding: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
+            <button onClick={saveUpi} style={{ padding: '10px 20px', background: RED, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>Save</button>
+          </div>
+          {upiMsg && <p style={{ fontSize: '12px', margin: '10px 0 0', color: '#555' }}>{upiMsg}</p>}
+        </div>
 
         {/* MENU MANAGEMENT */}
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
@@ -524,7 +557,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
               <div>
                 <strong>Order #{order.id}</strong> — {order.tableSession?.orderType === 'TAKEAWAY' ? `🥡 Takeaway · Token #${order.tokenNumber}` : `Table ${order.tableSession?.tableNumber}`}
                 <div style={{ fontSize: '12px', color: '#888' }}>
-                  {order.tableSession?.customerName} · Rs. {order.totalAmount} · {order.payment?.status === 'PAID' ? 'Paid online' : 'Cash'}
+                  {order.tableSession?.customerName} · Rs. {order.totalAmount} · {order.paymentMode === 'UPI' ? 'UPI' : order.payment?.status === 'PAID' ? 'Paid online' : 'Cash'}
                 </div>
                 <div style={{ fontSize: '12px', color: '#aaa' }}>
                   {order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : ''}
