@@ -18,6 +18,9 @@ function App() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [upiId, setUpiId] = useState('');
   const [upiOpen, setUpiOpen] = useState(false);
+  const [tabOpen, setTabOpen] = useState(false);
+  const [tab, setTab] = useState(null);
+  const [splitCount, setSplitCount] = useState(1);
   const [restaurantName, setRestaurantName] = useState('');
   const [menuItems, setMenuItems] = useState([]);
   const [cart, setCart] = useState({});
@@ -148,6 +151,43 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Table tab: everything this guest has ordered, refreshed while the panel is open
+  const loadTab = async () => {
+    if (!session) return;
+    try {
+      const response = await axios.get(`${API_URL}/public/sessions/${session.id}/tab`);
+      setTab(response.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (!tabOpen || !session) return;
+    loadTab();
+    const timer = setInterval(loadTab, 4000);
+    return () => clearInterval(timer);
+  }, [tabOpen, session?.id]);
+
+  const requestBill = async () => {
+    try {
+      await axios.post(`${API_URL}/public/sessions/${session.id}/request-bill`);
+      loadTab();
+    } catch (err) {
+      setError('Could not request the bill. Please call a staff member.');
+    }
+  };
+
+  // The owner has taken payment, so the table is already free: just leave
+  const finishAfterPayment = () => {
+    setTabOpen(false);
+    setTab(null);
+    setOrder(null);
+    setCart({});
+    setSession(null);
+    setTableNumber(TABLE_FROM_LINK);
   };
 
   // Guest tapped "I'm done": free the table and return to the welcome screen
@@ -357,6 +397,93 @@ function App() {
 
   const brand = `🍴 ${restaurantName || 'TableServe'}`;
 
+  const tabPanel = tabOpen && session ? (() => {
+    const total = tab ? Number(tab.total) : 0;
+    const people = Math.max(1, splitCount);
+    const share = (total / people).toFixed(2);
+    const upiLink = upiId ? `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(restaurantName || 'Restaurant')}&am=${share}&cu=INR&tn=${encodeURIComponent('Table bill')}` : '';
+    const qr = upiLink ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}` : '';
+    const chip = (st) => ({ PENDING: '#e67e22', PREPARING: '#2980b9', READY: '#8e44ad', SERVED: '#27ae60' }[st] || '#888');
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 60 }}>
+        <div style={{ background: 'white', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: '480px', maxHeight: '88vh', overflowY: 'auto', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <h2 style={{ margin: 0, fontSize: '18px', color: DARK }}>🧾 Your Tab · Table {session.tableNumber}</h2>
+            <button onClick={() => setTabOpen(false)} style={{ background: '#eee', border: 'none', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px' }}>✕</button>
+          </div>
+          <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#999' }}>Order as often as you like. Pay once at the end.</p>
+
+          {!tab && <p style={{ color: '#888' }}>Loading...</p>}
+          {tab && tab.orders.length === 0 && <p style={{ color: '#888' }}>Nothing ordered yet.</p>}
+          {tab && tab.orders.map((o) => (
+            <div key={o.id} style={{ border: '1px solid #eee', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                <strong>Order #{o.id}</strong>
+                <span style={{ fontWeight: 700, color: chip(o.status) }}>{o.status}</span>
+              </div>
+              {o.items.map((it, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#444' }}>
+                  <span>{it.quantity} × {it.name}</span>
+                  <span>Rs. {Number(it.lineTotal).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {tab && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '17px', fontWeight: 800, color: DARK, margin: '14px 0' }}>
+              <span>Total</span><span>Rs. {total.toFixed(2)}</span>
+            </div>
+          )}
+
+          {tab && tab.settled && (
+            <div style={{ textAlign: 'center', background: '#e9f9ee', borderRadius: '12px', padding: '16px' }}>
+              <div style={{ fontSize: '28px' }}>✅</div>
+              <div style={{ fontWeight: 700, color: '#27ae60' }}>Paid ({tab.settledMethod}). Thank you!</div>
+              <button onClick={finishAfterPayment} style={{ marginTop: '12px', padding: '11px 28px', background: DARK, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Finish</button>
+            </div>
+          )}
+
+          {tab && !tab.settled && tab.orders.length > 0 && (
+            <>
+              <div style={{ background: '#f7f5fb', borderRadius: '12px', padding: '12px', margin: '6px 0 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: DARK }}>Split equally between</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button onClick={() => setSplitCount(Math.max(1, splitCount - 1))} style={{ width: '28px', height: '28px', borderRadius: '6px', border: `1px solid ${RED}`, background: 'white', color: RED, fontWeight: 700, cursor: 'pointer' }}>−</button>
+                    <strong>{people}</strong>
+                    <button onClick={() => setSplitCount(Math.min(12, splitCount + 1))} style={{ width: '28px', height: '28px', borderRadius: '6px', border: 'none', background: RED, color: 'white', fontWeight: 700, cursor: 'pointer' }}>+</button>
+                  </span>
+                </div>
+                {people > 1 && <div style={{ marginTop: '8px', fontSize: '14px', color: DARK }}>Each person pays <strong>Rs. {share}</strong></div>}
+              </div>
+
+              {!tab.billRequested ? (
+                <button onClick={requestBill} style={{ width: '100%', padding: '14px', background: RED, color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '15px', cursor: 'pointer' }}>
+                  Request bill
+                </button>
+              ) : (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: '#fff4e6', color: '#e67e22', borderRadius: '10px', padding: '10px', fontWeight: 700, fontSize: '14px', marginBottom: '12px' }}>
+                    Bill requested. Staff are on the way.
+                  </div>
+                  {upiId && (
+                    <>
+                      <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>Prefer UPI? Scan to pay {people > 1 ? 'your share' : 'the bill'} (Rs. {share})</div>
+                      <img src={qr} alt="UPI QR" style={{ width: '170px', height: '170px' }} />
+                      <a href={upiLink} style={{ display: 'block', marginTop: '8px', padding: '10px', background: DARK, color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: 600, fontSize: '13px' }}>Open UPI app</a>
+                      <div style={{ fontSize: '11px', color: '#aaa', marginTop: '6px' }}>After paying, show your screen to the staff.</div>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  })() : null;
+
   if (!session) {
     return (
       <div style={pageStyle}>
@@ -469,6 +596,7 @@ function App() {
     const finalLabel = labels[2];
     return (
       <div style={pageStyle}>
+        {tabPanel}
         <div style={topBar}>{brand}</div>
         <div style={{ maxWidth: '420px', margin: '40px auto', padding: '0 16px' }}>
           <div style={{ background: 'white', borderRadius: '14px', padding: '28px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center' }}>
@@ -511,6 +639,14 @@ function App() {
             >
               Order More
             </button>
+            {!isTakeaway && (
+              <button
+                onClick={() => setTabOpen(true)}
+                style={{ marginTop: '12px', marginLeft: '8px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: '#27ae60', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                🧾 My Tab / Bill
+              </button>
+            )}
             <button
               onClick={handleDone}
               style={{ marginTop: '12px', marginLeft: '8px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: 'white', color: RED, border: `1px solid ${RED}`, borderRadius: '8px', cursor: 'pointer' }}
@@ -525,10 +661,16 @@ function App() {
 
   return (
     <div style={pageStyle}>
+      {tabPanel}
       <div style={topBar}>
         {brand}
         <div style={{ fontSize: '13px', fontWeight: 400, color: '#ccc', marginTop: '2px' }}>
           {session.orderType === 'TAKEAWAY' ? '🥡 Takeaway' : `Table ${session.tableNumber}`} · {session.customerName}
+          {session.orderType !== 'TAKEAWAY' && (
+            <button onClick={() => setTabOpen(true)} style={{ marginLeft: '12px', padding: '3px 10px', fontSize: '11px', fontWeight: 700, background: '#27ae60', color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer' }}>
+              🧾 My Tab
+            </button>
+          )}
           <button onClick={handleDone} style={{ marginLeft: '12px', padding: '3px 10px', fontSize: '11px', fontWeight: 600, background: 'transparent', color: '#ccc', border: '1px solid #666', borderRadius: '12px', cursor: 'pointer' }}>
             {session.orderType === 'TAKEAWAY' ? 'Leave' : "I'm done"}
           </button>
@@ -653,6 +795,15 @@ function App() {
             <div style={{ fontWeight: 700 }}>{cartItemCount} item{cartItemCount > 1 ? 's' : ''}</div>
             <div style={{ fontSize: '13px', opacity: 0.9 }}>Rs. {calculateTotal()}</div>
           </div>
+          {session.orderType !== 'TAKEAWAY' ? (
+            <button
+              onClick={() => handlePayCash('PAY_LATER')}
+              disabled={loading}
+              style={{ padding: '12px 20px', fontSize: '14px', fontWeight: 700, background: 'white', color: RED, border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              {loading ? 'Placing...' : 'Place order · pay after meal'}
+            </button>
+          ) : (
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => handlePayCash('CASH')}
@@ -678,6 +829,7 @@ function App() {
               {loading ? 'Placing...' : 'Pay Online →'}
             </button>
           </div>
+          )}
         </div>
       )}
 

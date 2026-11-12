@@ -27,6 +27,7 @@ function OwnerDashboard() {
 
   const [staff, setStaff] = useState([]);
   const [upiInput, setUpiInput] = useState('');
+  const [bills, setBills] = useState([]);
   const [upiMsg, setUpiMsg] = useState('');
   const [newStaff, setNewStaff] = useState({ name: '', pin: '' });
 
@@ -210,6 +211,26 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     }
   };
 
+  const fetchBills = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/owner/bills`, { headers: { Authorization: `Bearer ${token}` } });
+      setBills(response.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const settleBill = async (bill, method) => {
+    if (!window.confirm(`Table ${bill.tableNumber}: Rs. ${Number(bill.total).toFixed(2)} received by ${method}?`)) return;
+    try {
+      await axios.post(`${API_URL}/owner/sessions/${bill.sessionId}/settle`, { method }, { headers: { Authorization: `Bearer ${token}` } });
+      fetchBills();
+      fetchTables();
+    } catch (err) {
+      setError(`Could not close this bill (${err.response?.status || err.message}).`);
+    }
+  };
+
   const fetchUpi = async () => {
     try {
       const response = await axios.get(`${API_URL}/owner/upi`, { headers: { Authorization: `Bearer ${token}` } });
@@ -269,11 +290,13 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     fetchTables();
     fetchStaff();
     fetchUpi();
+    fetchBills();
     // Keep the numbers and chef workloads fresh without pressing Refresh
     const timer = setInterval(() => {
       fetchDashboard();
       fetchStaff();
       fetchTables();
+      fetchBills();
     }, 5000);
     return () => clearInterval(timer);
   }, [token]);
@@ -375,6 +398,25 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
               <div style={{ fontSize: '12px', color: '#27ae60', fontWeight: 600, textTransform: 'uppercase' }}>Served</div>
               <div style={{ fontSize: '26px', fontWeight: 700, marginTop: '6px' }}>{summary.servedCount}</div>
             </div>
+          </div>
+        )}
+
+        {/* BILL REQUESTS */}
+        {bills.length > 0 && (
+          <div style={{ background: '#fff4e6', border: '2px solid #e67e22', borderRadius: '12px', padding: '16px 20px', marginBottom: '24px' }}>
+            <h2 style={{ fontSize: '16px', margin: '0 0 12px', color: '#e67e22' }}>🔔 Bill requests ({bills.length})</h2>
+            {bills.map((b) => (
+              <div key={b.sessionId} style={{ background: 'white', borderRadius: '10px', padding: '12px 14px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div>
+                  <strong>Table {b.tableNumber}</strong> · {b.customerName}
+                  <div style={{ fontSize: '12px', color: '#888' }}>{b.orderCount} order{b.orderCount > 1 ? 's' : ''} · <strong style={{ color: '#111' }}>Rs. {Number(b.total).toFixed(2)}</strong></div>
+                </div>
+                <div>
+                  <button onClick={() => settleBill(b, 'CASH')} style={{ padding: '7px 14px', fontSize: '12px', fontWeight: 700, background: '#27ae60', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', marginRight: '6px' }}>Paid · Cash</button>
+                  <button onClick={() => settleBill(b, 'UPI')} style={{ padding: '7px 14px', fontSize: '12px', fontWeight: 700, background: '#2980b9', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Paid · UPI</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -557,7 +599,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
               <div>
                 <strong>Order #{order.id}</strong> — {order.tableSession?.orderType === 'TAKEAWAY' ? `🥡 Takeaway · Token #${order.tokenNumber}` : `Table ${order.tableSession?.tableNumber}`}
                 <div style={{ fontSize: '12px', color: '#888' }}>
-                  {order.tableSession?.customerName} · Rs. {order.totalAmount} · {order.paymentMode === 'UPI' ? 'UPI' : order.payment?.status === 'PAID' ? 'Paid online' : 'Cash'}
+                  {order.tableSession?.customerName} · Rs. {order.totalAmount} · {order.paymentMode === 'PAY_LATER' ? 'Pay after meal' : order.paymentMode === 'UPI' ? 'UPI' : order.payment?.status === 'PAID' ? 'Paid online' : 'Cash'}
                 </div>
                 <div style={{ fontSize: '12px', color: '#aaa' }}>
                   {order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : ''}
