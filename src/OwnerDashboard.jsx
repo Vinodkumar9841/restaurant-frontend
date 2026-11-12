@@ -28,6 +28,7 @@ function OwnerDashboard() {
   const [staff, setStaff] = useState([]);
   const [upiInput, setUpiInput] = useState('');
   const [bills, setBills] = useState([]);
+  const [stats, setStats] = useState(null);
   const [upiMsg, setUpiMsg] = useState('');
   const [newStaff, setNewStaff] = useState({ name: '', pin: '' });
 
@@ -211,6 +212,15 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     }
   };
 
+  const fetchStats = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/owner/analytics`, { headers: { Authorization: `Bearer ${token}` } });
+      setStats(response.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchBills = async () => {
     try {
       const response = await axios.get(`${API_URL}/owner/bills`, { headers: { Authorization: `Bearer ${token}` } });
@@ -291,12 +301,14 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     fetchStaff();
     fetchUpi();
     fetchBills();
+    fetchStats();
     // Keep the numbers and chef workloads fresh without pressing Refresh
     const timer = setInterval(() => {
       fetchDashboard();
       fetchStaff();
       fetchTables();
       fetchBills();
+      fetchStats();
     }, 5000);
     return () => clearInterval(timer);
   }, [token]);
@@ -419,6 +431,77 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
             ))}
           </div>
         )}
+
+        {/* SALES ANALYTICS */}
+        {stats && (() => {
+          const maxDay = Math.max(1, ...stats.days.map((d) => Number(d.sales)));
+          const maxItem = Math.max(1, ...stats.topItems.map((t) => t.quantity));
+          const dayName = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' });
+          const pay = Object.entries(stats.byPayment || {});
+          const payTotal = pay.reduce((sum, [, v]) => sum + Number(v), 0) || 1;
+          const payName = { CASH: 'Cash', UPI: 'UPI', ONLINE: 'Online', UNPAID: 'Not paid yet' };
+          const payColor = { CASH: '#27ae60', UPI: '#2980b9', ONLINE: '#8e44ad', UNPAID: '#e67e22' };
+          const tile = { flex: '1 1 130px', background: '#faf7f2', borderRadius: '10px', padding: '12px 14px' };
+          return (
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+              <h2 style={{ fontSize: '16px', margin: '0 0 14px' }}>📊 Sales</h2>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
+                <div style={tile}><div style={{ fontSize: '12px', color: '#888' }}>Today</div><div style={{ fontSize: '22px', fontWeight: 800 }}>Rs. {Number(stats.todaySales).toFixed(0)}</div></div>
+                <div style={tile}><div style={{ fontSize: '12px', color: '#888' }}>Orders today</div><div style={{ fontSize: '22px', fontWeight: 800 }}>{stats.todayOrders}</div></div>
+                <div style={tile}><div style={{ fontSize: '12px', color: '#888' }}>Last 7 days</div><div style={{ fontSize: '22px', fontWeight: 800 }}>Rs. {Number(stats.weekSales).toFixed(0)}</div></div>
+              </div>
+
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#555', marginBottom: '8px' }}>Daily sales</div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '120px', marginBottom: '6px' }}>
+                {stats.days.map((d) => (
+                  <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                    <div style={{ fontSize: '10px', color: '#888', marginBottom: '2px' }}>{Number(d.sales) > 0 ? Number(d.sales).toFixed(0) : ''}</div>
+                    <div title={`${d.orders} orders`} style={{ width: '100%', maxWidth: '36px', height: `${Math.max(3, (Number(d.sales) / maxDay) * 90)}px`, background: RED, borderRadius: '4px 4px 0 0', opacity: Number(d.sales) > 0 ? 1 : 0.2 }} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                {stats.days.map((d) => (
+                  <div key={d.date} style={{ flex: 1, textAlign: 'center', fontSize: '11px', color: '#888' }}>{dayName(d.date)}</div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 240px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#555', marginBottom: '8px' }}>Best sellers (30 days)</div>
+                  {stats.topItems.length === 0 && <div style={{ fontSize: '13px', color: '#aaa' }}>No orders yet.</div>}
+                  {stats.topItems.map((t) => (
+                    <div key={t.name} style={{ marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span>{t.name}</span><strong>{t.quantity}</strong></div>
+                      <div style={{ height: '6px', background: '#f0f0f0', borderRadius: '3px' }}>
+                        <div style={{ width: `${(t.quantity / maxItem) * 100}%`, height: '100%', background: '#e67e22', borderRadius: '3px' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ flex: '1 1 200px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#555', marginBottom: '8px' }}>Last 7 days</div>
+                  <div style={{ fontSize: '13px', marginBottom: '10px' }}>🍽️ Dine-in: <strong>{stats.dineInOrders}</strong> &nbsp; 🥡 Takeaway: <strong>{stats.takeawayOrders}</strong></div>
+                  {pay.length > 0 && (
+                    <>
+                      <div style={{ display: 'flex', height: '10px', borderRadius: '5px', overflow: 'hidden', marginBottom: '8px' }}>
+                        {pay.map(([k, v]) => <div key={k} style={{ width: `${(Number(v) / payTotal) * 100}%`, background: payColor[k] || '#999' }} />)}
+                      </div>
+                      {pay.map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#555' }}>
+                          <span><span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: payColor[k] || '#999', marginRight: '6px' }} />{payName[k] || k}</span>
+                          <span>Rs. {Number(v).toFixed(0)}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* UPI PAYMENT SETTING */}
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
