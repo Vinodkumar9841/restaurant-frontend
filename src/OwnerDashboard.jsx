@@ -1,8 +1,33 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 const RED = '#e23744';
+
+// Short two-tone chime (browsers only allow sound after the user has clicked something)
+let audioCtx = null;
+function playBeep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    [880, 1175].forEach((freq, i) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      const start = audioCtx.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.25, start);
+      g.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
+      o.start(start);
+      o.stop(start + 0.4);
+    });
+  } catch (e) {
+    // no sound available: ignore
+  }
+}
+
 const DARK = '#1c1c1c';
 
 function OwnerDashboard() {
@@ -29,6 +54,10 @@ function OwnerDashboard() {
   const [upiInput, setUpiInput] = useState('');
   const [bills, setBills] = useState([]);
   const [stats, setStats] = useState(null);
+  const [calls, setCalls] = useState([]);
+  const [soundOn, setSoundOn] = useState(false);
+  const soundRef = useRef(false);
+  const knownAlerts = useRef(null);
   const [upiMsg, setUpiMsg] = useState('');
   const [newStaff, setNewStaff] = useState({ name: '', pin: '' });
 
@@ -221,6 +250,33 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     }
   };
 
+  const fetchCalls = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/owner/waiter-calls`, { headers: { Authorization: `Bearer ${token}` } });
+      setCalls(response.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const waiterDone = async (call) => {
+    try {
+      await axios.post(`${API_URL}/owner/sessions/${call.sessionId}/waiter-done`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      fetchCalls();
+    } catch (err) {
+      setError(`Could not clear this call (${err.response?.status || err.message}).`);
+    }
+  };
+
+  // Chime when a new bill request or waiter call shows up
+  useEffect(() => {
+    const keys = new Set([...bills.map((b) => 'b' + b.sessionId), ...calls.map((c) => 'c' + c.sessionId + c.calledAt)]);
+    if (knownAlerts.current && soundRef.current && [...keys].some((k) => !knownAlerts.current.has(k))) {
+      playBeep();
+    }
+    knownAlerts.current = keys;
+  }, [bills, calls]);
+
   const fetchBills = async () => {
     try {
       const response = await axios.get(`${API_URL}/owner/bills`, { headers: { Authorization: `Bearer ${token}` } });
@@ -302,6 +358,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
     fetchUpi();
     fetchBills();
     fetchStats();
+    fetchCalls();
     // Keep the numbers and chef workloads fresh without pressing Refresh
     const timer = setInterval(() => {
       fetchDashboard();
@@ -309,6 +366,7 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
       fetchTables();
       fetchBills();
       fetchStats();
+      fetchCalls();
     }, 5000);
     return () => clearInterval(timer);
   }, [token]);
@@ -410,6 +468,19 @@ button{display:block;margin:16px auto;padding:8px 20px}@media print{button{displ
               <div style={{ fontSize: '12px', color: '#27ae60', fontWeight: 600, textTransform: 'uppercase' }}>Served</div>
               <div style={{ fontSize: '26px', fontWeight: 700, marginTop: '6px' }}>{summary.servedCount}</div>
             </div>
+          </div>
+        )}
+
+        {/* WAITER CALLS */}
+        {calls.length > 0 && (
+          <div style={{ background: '#fdecea', border: '2px solid #e23744', borderRadius: '12px', padding: '16px 20px', marginBottom: '24px' }}>
+            <h2 style={{ fontSize: '16px', margin: '0 0 12px', color: '#e23744' }}>🙋 Waiter called ({calls.length})</h2>
+            {calls.map((c) => (
+              <div key={c.sessionId} style={{ background: 'white', borderRadius: '10px', padding: '12px 14px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                <div><strong>Table {c.tableNumber}</strong> · {c.customerName}</div>
+                <button onClick={() => waiterDone(c)} style={{ padding: '7px 14px', fontSize: '12px', fontWeight: 700, background: '#27ae60', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Done</button>
+              </div>
+            ))}
           </div>
         )}
 

@@ -21,6 +21,7 @@ function App() {
   const [tabOpen, setTabOpen] = useState(false);
   const [tab, setTab] = useState(null);
   const [splitCount, setSplitCount] = useState(1);
+  const [waiterCalled, setWaiterCalled] = useState(false);
   const [restaurantName, setRestaurantName] = useState('');
   const [menuItems, setMenuItems] = useState([]);
   const [cart, setCart] = useState({});
@@ -170,6 +171,18 @@ function App() {
     const timer = setInterval(loadTab, 4000);
     return () => clearInterval(timer);
   }, [tabOpen, session?.id]);
+
+  // "Call waiter": tell the owner this table needs help
+  const callWaiter = async () => {
+    if (waiterCalled) return;
+    try {
+      await axios.post(`${API_URL}/public/sessions/${session.id}/call-waiter`);
+      setWaiterCalled(true);
+      setTimeout(() => setWaiterCalled(false), 90000);
+    } catch (err) {
+      setError('Could not call the waiter. Please wave to a staff member.');
+    }
+  };
 
   const requestBill = async () => {
     try {
@@ -647,6 +660,14 @@ function App() {
                 🧾 My Tab / Bill
               </button>
             )}
+            {!isTakeaway && (
+              <button
+                onClick={callWaiter}
+                style={{ marginTop: '12px', marginLeft: '8px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: waiterCalled ? '#eee' : 'white', color: waiterCalled ? '#27ae60' : RED, border: `1px solid ${waiterCalled ? '#27ae60' : RED}`, borderRadius: '8px', cursor: 'pointer' }}
+              >
+                {waiterCalled ? '✓ Waiter is coming' : '🔔 Call waiter'}
+              </button>
+            )}
             <button
               onClick={handleDone}
               style={{ marginTop: '12px', marginLeft: '8px', padding: '11px 24px', fontSize: '14px', fontWeight: 600, background: 'white', color: RED, border: `1px solid ${RED}`, borderRadius: '8px', cursor: 'pointer' }}
@@ -831,6 +852,15 @@ function App() {
           </div>
           )}
         </div>
+      )}
+
+      {session.orderType !== 'TAKEAWAY' && (
+        <button
+          onClick={callWaiter}
+          style={{ position: 'fixed', left: '16px', bottom: cartItemCount > 0 ? '88px' : '20px', zIndex: 20, padding: '10px 16px', fontSize: '13px', fontWeight: 700, background: waiterCalled ? '#e9f9ee' : 'white', color: waiterCalled ? '#27ae60' : RED, border: `1px solid ${waiterCalled ? '#27ae60' : RED}`, borderRadius: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', cursor: 'pointer' }}
+        >
+          {waiterCalled ? '✓ Waiter is coming' : '🔔 Call waiter'}
+        </button>
       )}
 
       {error && <p style={{ color: RED, textAlign: 'center', padding: '0 16px' }}>{error}</p>}

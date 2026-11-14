@@ -1,7 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+
+// Short two-tone chime (browsers only allow sound after the user has clicked something)
+let audioCtx = null;
+function playBeep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    [880, 1175].forEach((freq, i) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      const start = audioCtx.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.25, start);
+      g.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
+      o.start(start);
+      o.stop(start + 0.4);
+    });
+  } catch (e) {
+    // no sound available: ignore
+  }
+}
+
 const RED = '#e23744';
 const DARK = '#1c1c1c';
 
@@ -26,6 +51,9 @@ function KitchenDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('mine');
+  const [soundOn, setSoundOn] = useState(false);
+  const soundRef = useRef(false);
+  const knownIds = useRef(null);
 
   const chefName = token ? getChefNameFromToken(token) : null;
 
@@ -57,7 +85,13 @@ function KitchenDashboard() {
       const response = await axios.get(`${API_URL}/orders/kitchen`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setOrders(response.data.sort((a, b) => b.id - a.id));
+      const list = response.data.sort((a, b) => b.id - a.id);
+      // Chime when an order appears that we have not seen before
+      if (knownIds.current && soundRef.current && list.some((o) => !knownIds.current.has(o.id) && o.status === 'PENDING')) {
+        playBeep();
+      }
+      knownIds.current = new Set(list.map((o) => o.id));
+      setOrders(list);
     } catch (err) {
       if (err.response?.status === 401 || err.response?.status === 403) {
         setError('Session expired. Please log in again.');
@@ -173,6 +207,12 @@ function KitchenDashboard() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => { const next = !soundOn; setSoundOn(next); soundRef.current = next; if (next) playBeep(); }}
+            style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 600, background: soundOn ? '#27ae60' : '#555', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            {soundOn ? '🔔 Sound on' : '🔕 Sound off'}
+          </button>
           <button onClick={fetchOrders} disabled={loading} style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 600, background: '#333', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
             {loading ? '...' : '⟳ Refresh'}
           </button>
