@@ -158,7 +158,7 @@ function App() {
   const loadTab = async () => {
     if (!session) return;
     try {
-      const response = await axios.get(`${API_URL}/public/sessions/${session.id}/tab`);
+      const response = await axios.get(`${API_URL}/public/sessions/${session.id}/tab`, { params: { key: session.accessKey } });
       setTab(response.data);
     } catch (err) {
       console.error(err);
@@ -176,7 +176,7 @@ function App() {
   const callWaiter = async () => {
     if (waiterCalled) return;
     try {
-      await axios.post(`${API_URL}/public/sessions/${session.id}/call-waiter`);
+      await axios.post(`${API_URL}/public/sessions/${session.id}/call-waiter`, null, { params: { key: session.accessKey } });
       setWaiterCalled(true);
       setTimeout(() => setWaiterCalled(false), 90000);
     } catch (err) {
@@ -186,7 +186,7 @@ function App() {
 
   const requestBill = async () => {
     try {
-      await axios.post(`${API_URL}/public/sessions/${session.id}/request-bill`);
+      await axios.post(`${API_URL}/public/sessions/${session.id}/request-bill`, null, { params: { key: session.accessKey } });
       loadTab();
     } catch (err) {
       setError('Could not request the bill. Please call a staff member.');
@@ -369,7 +369,7 @@ function App() {
     if (!order) return;
     const interval = setInterval(async () => {
       try {
-        const response = await axios.get(`${API_URL}/orders/${order.id}`);
+        const response = await axios.get(`${API_URL}/orders/${order.id}`, { params: { key: session?.accessKey } });
         setOrder(response.data);
       } catch (err) {
         console.error(err);
